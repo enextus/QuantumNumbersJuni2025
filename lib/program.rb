@@ -24,10 +24,27 @@ else
 end
 
 # Список API для получения квантовых случайных чисел
+# Замените <your_hotbits_key> и <your_idq_key> на ваши ключи
 apis = [
-  { name: 'ANU QRNG', url: "https://api.qrng.anu.edu.au/api/rand?length=#{count}&type=uint16", data_key: 'data', success_key: 'success' },
-  { name: 'HotBits', url: "https://www.fourmilab.ch/cgi-bin/Hotbits.api?nbytes=#{count}&fmt=json", data_key: 'random-data', success_key: 'status', success_value: 'success' },
-  { name: 'Quantropi QRNG', url: "https://api.quantropi.com/qrng?length=#{count}&type=uint8", data_key: 'numbers', success_key: 'success' }
+  {
+    name: 'ANU QRNG',
+    url: "https://qrng.anu.edu.au/wp-json/qrng/random-numbers?count=#{count}",
+    data_key: 'data',
+    success_key: 'success'
+  },
+  {
+    name: 'HotBits',
+    url: "https://www.fourmilab.ch/cgi-bin/Hotbits.api?nbytes=#{count}&fmt=json&key=<your_hotbits_key>",
+    data_key: 'random-data',
+    success_key: 'status',
+    success_value: 'success'
+  },
+  {
+    name: 'ID Quantique QRNG',
+    url: "https://api.idquantique.com/qrng/v1/random?length=#{count}&type=uint8&key=<your_idq_key>",
+    data_key: 'numbers',
+    success_key: 'success'
+  }
 ]
 
 # Функция для выполнения запроса к API
@@ -138,7 +155,3 @@ end
 
 # Выводим сообщение о завершении программы
 puts "Программа завершена. Работа окончена."
-
-
-
-
