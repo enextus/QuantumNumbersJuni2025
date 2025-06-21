@@ -1,88 +1,144 @@
-# Подключаем библиотеки для работы с HTTP-запросами и JSON
+# Подключаем стандартные библиотеки Ruby для работы с HTTP и JSON
 require 'net/http'
 require 'json'
 
 # Выводим сообщение о запуске программы
 puts "Программа запущена. Начало работы."
 
-# Получаем аргумент из командной строки (количество чисел)
+# Чтение аргумента из командной строки (количество чисел)
 puts "Чтение аргумента из командной строки..."
 count = ARGV[0]&.to_i
 puts "Получен аргумент командной строки: '#{ARGV[0] || 'не указан'}'"
 puts "Преобразование аргумента в число: #{count || 'nil'}"
 
-# Проверяем корректность введённого значения
+# Проверка корректности введённого количества чисел
 puts "Проверка корректности введённого количества..."
 if count.nil? || count <= 0
-  # Выводим сообщения об ошибке, если аргумент некорректен
   puts "Ошибка: аргумент отсутствует или не является положительным числом!"
   puts "Текущее значение count: #{count}"
   puts "Инструкция: укажите положительное целое число как аргумент."
-  puts "Пример запуска: ruby program.rb 5"
+  puts "Пример запуска: ruby lib/program.rb 5"
   exit 1
 else
-  # Подтверждаем корректность аргумента
   puts "Аргумент корректен. Количество чисел для запроса: #{count}"
 end
 
-# Формируем URL для запроса к API
-puts "Формирование URL для запроса..."
-uri = URI("https://www.lfdr.de/QRNG/random?count=#{count}")
-puts "URL успешно сформирован: #{uri}"
+# Список API для получения квантовых случайных чисел
+apis = [
+  { name: 'ANU QRNG', url: "https://api.qrng.anu.edu.au/api/rand?length=#{count}&type=uint16", data_key: 'data', success_key: 'success' },
+  { name: 'HotBits', url: "https://www.fourmilab.ch/cgi-bin/Hotbits.api?nbytes=#{count}&fmt=json", data_key: 'random-data', success_key: 'status', success_value: 'success' },
+  { name: 'Quantropi QRNG', url: "https://api.quantropi.com/qrng?length=#{count}&type=uint8", data_key: 'numbers', success_key: 'success' }
+]
 
-# Начинаем блок обработки сетевого запроса
-begin
-  # Сообщаем о начале выполнения запроса
-  puts "Отправка GET-запроса к API..."
-  response = Net::HTTP.get_response(uri)
-  puts "Запрос отправлен. Получен ответ от сервера."
-  puts "Код ответа HTTP: #{response.code}"
-  puts "Сообщение ответа: #{response.message}"
+# Функция для выполнения запроса к API
+def fetch_random_numbers(api, count)
+  uri = URI(api[:url])
+  puts "Формирование URL для #{api[:name]}: #{uri}"
 
-  # Проверяем, успешен ли запрос
-  puts "Проверка успешности ответа..."
-  if response.is_a?(Net::HTTPSuccess)
-    # Успешный ответ — начинаем обработку
-    puts "Ответ успешен (статус 200). Чтение тела ответа..."
-    body = response.body
-    puts "Тело ответа получено: #{body}"
+  max_attempts = 5
+  attempt = 1
 
+  while attempt <= max_attempts
+    puts "Попытка #{attempt} из #{max_attempts} для #{api[:name]}..."
     begin
-      # Парсим JSON из тела ответа
-      puts "Парсинг JSON из ответа..."
-      random_numbers = JSON.parse(body)
-      puts "JSON успешно распарсен. Тип данных: #{random_numbers.class}"
-      puts "Содержимое распаренного ответа: #{random_numbers.inspect}"
+      # Отправка GET-запроса с таймаутами
+      puts "Отправка GET-запроса к #{api[:name]}..."
+      response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', open_timeout: 5, read_timeout: 10) do |http|
+        http.get(uri.request_uri)
+      end
+      puts "Запрос отправлен. Получен ответ от #{api[:name]}."
+      puts "Код ответа HTTP: #{response.code}"
+      puts "Сообщение ответа: #{response.message}"
 
-      # Проверяем, что ответ — массив
-      puts "Проверка формата данных..."
-      if random_numbers.is_a?(Array)
-        # Выводим информацию об успешном результате
-        puts "Данные в формате массива. Количество элементов: #{random_numbers.size}"
-        puts "Все числа корректны. Вывод результата..."
-        puts "Случайные квантовые числа: #{random_numbers.join(', ')}"
+      # Проверка успешности ответа
+      puts "Проверка успешности ответа от #{api[:name]}..."
+      if response.is_a?(Net::HTTPSuccess)
+        # Преобразование тела ответа в UTF-8
+        puts "Ответ успешен (статус 200). Обработка тела ответа..."
+        body = response.body.encode('UTF-8', invalid: :replace, undef: :replace)
+        puts "Тело ответа (в UTF-8): #{body}"
+
+        # Парсинг JSON
+        puts "Парсинг JSON из ответа #{api[:name]}..."
+        json_response = JSON.parse(body)
+        puts "JSON успешно распарсен. Тип данных: #{json_response.class}"
+        puts "Содержимое JSON: #{json_response.inspect}"
+
+        # Проверка успешности API
+        puts "Проверка поля '#{api[:success_key]}' в ответе #{api[:name]}..."
+        success = api[:success_value] ? json_response[api[:success_key]] == api[:success_value] : json_response[api[:success_key]]
+        if success
+          # Извлечение чисел
+          puts "#{api[:name]} вернул успешный результат. Извлечение чисел..."
+          random_numbers = json_response[api[:data_key]]
+          puts "Полученные данные: #{random_numbers.inspect}"
+
+          # Проверка формата данных
+          puts "Проверка формата данных от #{api[:name]}..."
+          if random_numbers.is_a?(Array)
+            puts "Данные в формате массива. Количество элементов: #{random_numbers.size}"
+            puts "Все числа корректны. Вывод результата..."
+            return random_numbers
+          else
+            puts "Ошибка: данные не в формате массива!"
+            puts "Полученные данные: #{random_numbers.inspect}"
+            break
+          end
+        else
+          puts "Ошибка API #{api[:name]}: #{json_response['message'] || 'Неизвестная ошибка API'}"
+          puts "Полный ответ API: #{json_response.inspect}"
+          break
+        end
       else
-        # Сообщаем о неожиданном формате данных
-        puts "Ошибка: данные не в формате массива!"
-        puts "Полученные данные: #{random_numbers}"
+        puts "Запрос к #{api[:name]} не успешен!"
+        puts "Код ошибки HTTP: #{response.code}"
+        puts "Сообщение ошибки: #{response.message}"
       end
     rescue JSON::ParserError => e
-      # Обрабатываем ошибку парсинга JSON
-      puts "Ошибка при парсинге JSON!"
+      puts "Ошибка при парсинге JSON от #{api[:name]}!"
       puts "Текст ошибки: #{e.message}"
-      puts "Тело ответа, вызвавшее ошибку: #{body}"
+      puts "Тело ответа: #{response&.body}"
+      break
+    rescue StandardError => e
+      puts "Сетевая ошибка при запросе к #{api[:name]}!"
+      puts "Текст ошибки: #{e.message}"
     end
-  else
-    # Сообщаем об ошибке HTTP
-    puts "Запрос не успешен!"
-    puts "Код ошибки HTTP: #{response.code}"
-    puts "Сообщение ошибки: #{response.message}"
+
+    # Ждём 5 секунд перед следующей попыткой
+    attempt += 1
+    if attempt <= max_attempts
+      puts "Ожидание 5 секунд перед следующей попыткой..."
+      sleep(5)
+    end
   end
-rescue StandardError => e
-  # Обрабатываем сетевые или другие ошибки
-  puts "Произошла сетевая ошибка!"
-  puts "Текст ошибки: #{e.message}"
+
+  puts "Все попытки для #{api[:name]} исчерпаны. Переключение на другой API..."
+  nil
+end
+
+# Попытка получить числа от каждого API
+apis.each do |api|
+  puts "Попытка использовать API: #{api[:name]}"
+  numbers = fetch_random_numbers(api, count)
+  if numbers
+    puts "Успешно получены числа от #{api[:name]}!"
+    puts "Случайные квантовые числа: #{numbers.join(', ')}"
+    break
+  else
+    puts "Не удалось получить числа от #{api[:name]}. Переключение на следующий API..."
+  end
+end
+
+# Проверка, удалось ли получить числа
+puts "Проверка результата..."
+unless defined?(numbers) && numbers
+  puts "Ошибка: все API недоступны! Невозможно получить случайные числа."
+  exit 1
 end
 
 # Выводим сообщение о завершении программы
 puts "Программа завершена. Работа окончена."
+
+
+
+
