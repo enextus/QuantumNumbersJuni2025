@@ -1,0 +1,16 @@
+[
+  {
+    "name": "QRandom.io",
+    "url": "https://qrandom.io/api/random/ints?min=0&max=255&n=#{count}",
+    "data_key": "numbers",
+    "success_key": "numbers",
+    "active": true
+  },
+  {
+    "name": "LfD QRNG (OTH Regensburg)",
+    "url": "https://lfdr.de/qrng_api/qrng?length=#{count}&format=HEX",
+    "data_key": "qrn",
+    "success_key": "qrn",
+    "active": true
+  }
+]

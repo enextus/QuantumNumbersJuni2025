@@ -8,28 +8,28 @@
 
 ## Changelog
 
-| Date       | Version         | Notes                                                                                                                                                                                          |
-| ---------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2025‑06‑22 | **DEBUG BUILD** | • Added ultra‑verbose `puts` around every SQLite call<br>• **Fix:** compatible with *sqlite3‑gem ≥ 2.7* — `log_run` now passes bindings as **one array** instead of multiple positional params |
+| Date       | Version         | Notes                                                                                                                                                                                                                                                           |
+| ---------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2025‑06‑22 | **DEBUG BUILD** | • Added OptionParser & structured **Logger** levels<br>• Numbers column now stored as **JSON array** (was CSV)<br>• **Fix:** works with *sqlite3‑gem ≥ 2.7* — `log_run` passes bindings as one array<br>• Prepared INSERT statement for faster, safer DB writes |
 
 ---
 
 ## Содержание / Table of Contents
 
-| Русская версия                                           | English version                                             |
-| -------------------------------------------------------- | ----------------------------------------------------------- |
-| 0. [Назначение](#0-назначение)                           | 0. [Purpose](#0-purpose)                                    |
-| 1. [Алгоритм работы](#1-алгоритм-работы)                 | 1. [Algorithm](#1-algorithm)                                |
-|   1.1 [Старт](#11-старт)                                 |   1.1 [Startup](#11-startup)                                |
-|   1.2 [Инициализация SQLite](#12-инициализация-sqlite)   |   1.2 [SQLite init](#12-sqlite-init)                        |
-|   1.3 [Список API](#13-список-api)                       |   1.3 [API registry](#13-api-registry)                      |
-|   1.4 [`fetch_random_numbers`](#14-fetch_random_numbers) |   1.4 [`fetch_random_numbers`](#14-fetch_random_numbers-en) |
-|   1.5 [Главный цикл](#15-главный-цикл)                   |   1.5 [Main loop](#15-main-loop)                            |
-|   1.6 [Финал](#16-финал)                                 |   1.6 [Exit](#16-exit)                                      |
-| 2. [Требования](#2-требования)                           | 2. [Requirements](#2-requirements)                          |
-| 3. [Быстрый старт](#3-быстрый-старт)                     | 3. [Quick start](#3-quick-start)                            |
-| 4. [Полезные команды](#4-полезные-команды)               | 4. [Handy commands](#4-handy-commands)                      |
-| 5. [Лицензия](#5-лицензия)                               | 5. [License](#5-license)                                    |
+| Русская версия                                           | English version                                          |
+| -------------------------------------------------------- | -------------------------------------------------------- |
+| 0. [Назначение](#0-назначение)                           | 0. [Purpose](#0-purpose)                                 |
+| 1. [Алгоритм работы](#1-алгоритм-работы)                 | 1. [Algorithm](#1-algorithm)                             |
+|   1.1 [Старт](#11-старт)                                 |   1.1 [Startup](#11-startup)                             |
+|   1.2 [Инициализация SQLite](#12-инициализация-sqlite)   |   1.2 [SQLite init](#12-sqlite-init)                     |
+|   1.3 [Список API](#13-список-api)                       |   1.3 [API registry](#13-api-registry)                   |
+|   1.4 [`fetch_random_numbers`](#14-fetch_random_numbers) |   1.4 [`fetch_random_numbers`](#14-fetch_random_numbers) |
+|   1.5 [Главный цикл](#15-главный-цикл)                   |   1.5 [Main loop](#15-main-loop)                         |
+|   1.6 [Финал](#16-финал)                                 |   1.6 [Exit](#16-exit)                                   |
+| 2. [Требования](#2-требования)                           | 2. [Requirements](#2-requirements)                       |
+| 3. [Быстрый старт](#3-быстрый-старт)                     | 3. [Quick start](#3-quick-start)                         |
+| 4. [Полезные команды](#4-полезные-команды)               | 4. [Handy commands](#4-handy-commands)                   |
+| 5. [Лицензия](#5-лицензия)                               | 5. [License](#5-license)                                 |
 
 ---
 
@@ -75,13 +75,13 @@ db      = SQLite3::Database.new(DB_FILE)
 
 ```sql
 CREATE TABLE IF NOT EXISTS runs(
-                                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                                 ts        TEXT    NOT NULL,  -- ISO‑8601
-                                 api_name  TEXT,
-                                 count     INTEGER,
-                                 numbers   TEXT,
-                                 success   INTEGER,           -- 1 = OK, 0 = ERR
-                                 error_msg TEXT
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts        TEXT    NOT NULL,  -- ISO‑8601
+  api_name  TEXT,
+  count     INTEGER,
+  numbers   TEXT,              -- JSON array
+  success   INTEGER,           -- 1 = OK, 0 = ERR
+  error_msg TEXT
 );
 ```
 
@@ -91,11 +91,11 @@ CREATE TABLE IF NOT EXISTS runs(
 
 ```ruby
 {
-        name:        'QRandom.io',
-        url:         "https://qrandom.io/api/random/ints?n=#{count}&min=0&max=255",
-        data_key:    'numbers',
-        success_key: 'numbers',
-        active:      true
+  name:        'QRandom.io',
+  url:         "https://qrandom.io/api/random/ints?n=#{count}&min=0&max=255",
+  data_key:    'numbers',
+  success_key: 'numbers',
+  active:      true
 }
 ```
 
@@ -122,11 +122,11 @@ end
 [LOG] Inserted, last_insert_row_id=42 (success=1, api=QRandom.io)
 ```
 
-> **Замечание:** начиная с *sqlite3‑gem 2.7* `execute` принимает SQL + **один** объект связок (массив или хэш). Передача > 2 позиционных аргументов вызовет `ArgumentError`.
+> **Замечание:** начиная с *sqlite3‑gem 2.7* `execute` принимает SQL + **один** объект связок (массив или хэш). Передача более двух позиционных аргументов вызовет `ArgumentError`.
 
 #### 1.6 Финал
 
-* При успехе — вывод чисел и сообщении «Программа завершена успешно».
+* При успехе — вывод чисел и сообщение «Программа завершена успешно».
 * При неудаче — «Все активные API недоступны», `exit 1`.
 
 ---
@@ -147,17 +147,15 @@ end
 
 ```bash
 cd lib
-ruby App_with_sqlite_debug.rb 5
+ruby App_with_sqlite_debug.rb -n 5
 sqlite3 random_runs.sqlite3 'SELECT * FROM runs ORDER BY id DESC LIMIT 1;'
 ```
 
 Пример вывода (сокращённый):
 
 ```
-[LOG] Inserting row – api="QRandom.io", count=5, success=true
-[LOG] Inserted, last_insert_row_id=1
+[INFO] Logged (id=1, api=QRandom.io, success=true)
 ✅ Получены числа: 118, 218, 124, 131, 166
-[SUMMARY] Total rows in 'runs' table: 1
 ```
 
 ---
@@ -172,92 +170,4 @@ sqlite3 random_runs.sqlite3 'SELECT * FROM runs ORDER BY id DESC LIMIT 1;'
 
 ---
 
-### 5. Лицензия
-
-MIT
-
----
-
-## English version
-
-### 0. Purpose
-
-`App_with_sqlite_debug.rb` is a stand‑alone Ruby script that:
-
-* accepts an integer **N** via the CLI;
-* cycles through several QRNG / TRNG APIs until one returns **N** bytes in a valid JSON payload;
-* **logs** every attempt (including failures) into `lib/random_runs.sqlite3`;
-* prints an ANSI‑coloured DEBUG trace with HTTP, JSON, and SQLite details.
-
----
-
-### 1. Algorithm
-
-#### 1.1 Startup
-
-| Step | Action                                                |
-| ---- | ----------------------------------------------------- |
-| 1    | Print Ruby version, platform, script directory        |
-| 2    | `require 'sqlite3'`; on `LoadError` show rebuild hint |
-| 3    | Validate `ARGV[0] > 0`; otherwise print usage & exit  |
-
-#### 1.2 SQLite init
-
-* Creates **runs** table on the first run (schema identical to RU block).
-* Displays DLL version and current row count.
-
-#### 1.3 API registry
-
-`legacy_apis + extra_apis` filtered by `:active`.
-
-#### 1.4 `fetch_random_numbers`
-
-* Up to 5 retries, 5 / 10 s timeouts;
-* Success determined via `success_key` / presence of `data_key`;
-* HEX string → byte array; returns numbers or `nil`.
-
-#### 1.5 Main loop
-
-Iterate APIs → `log_run` → break on first success.
-
-#### 1.6 Exit
-
-Print numbers on success, else abort message.
-
----
-
-### 2. Requirements
-
-| Component                     | Install                                                                                  |
-| ----------------------------- | ---------------------------------------------------------------------------------------- |
-| **Ruby 3.4 ×64 (mingw‑ucrt)** | RubyInstaller + DevKit                                                                   |
-| **MSYS2‑UCRT64 toolchain**    | `ridk exec pacman -S mingw-w64-ucrt-x86_64-toolchain`                                    |
-| **libsqlite3‑0.dll**          | `pacman -S mingw-w64-ucrt-x86_64-sqlite3`                                                |
-| **Locally-built gem**         | `gem install sqlite3 --platform=ruby --with-sqlite3-dir=C:/opt/Ruby34-x64/msys64/ucrt64` |
-| **PATH**                      | ensure `…\ucrt64\bin` precedes Git’s `mingw64\bin`                                       |
-
----
-
-### 3. Quick start
-
-```bash
-cd lib
-ruby App_with_sqlite_debug.rb 5
-sqlite3 random_runs.sqlite3 'SELECT * FROM runs ORDER BY id DESC LIMIT 1;'
-```
-
----
-
-### 4. Handy commands
-
-| Goal                            | Command                                                                                                                 |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Check SQLite DLL version        | `ruby -e "require 'sqlite3'; puts SQLite3::SQLITE_VERSION"`                                                             |
-| Rebuild gem after MSYS2 upgrade | `gem install sqlite3 --platform=ruby --with-sqlite3-dir=…`                                                              |
-| Last 10 failures                | `sqlite3 random_runs.sqlite3 'SELECT id, ts, api_name, error_msg FROM runs WHERE success=0 ORDER BY id DESC LIMIT 10;'` |
-
----
-
-### 5. License
-
-MIT
+### 5. Лиц
