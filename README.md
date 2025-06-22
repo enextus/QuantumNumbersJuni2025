@@ -75,13 +75,13 @@ db      = SQLite3::Database.new(DB_FILE)
 
 ```sql
 CREATE TABLE IF NOT EXISTS runs(
-  id        INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts        TEXT    NOT NULL,  -- ISO‑8601
-  api_name  TEXT,
-  count     INTEGER,
-  numbers   TEXT,
-  success   INTEGER,           -- 1 = OK, 0 = ERR
-  error_msg TEXT
+                                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                                 ts        TEXT    NOT NULL,  -- ISO‑8601
+                                 api_name  TEXT,
+                                 count     INTEGER,
+                                 numbers   TEXT,
+                                 success   INTEGER,           -- 1 = OK, 0 = ERR
+                                 error_msg TEXT
 );
 ```
 
@@ -91,11 +91,11 @@ CREATE TABLE IF NOT EXISTS runs(
 
 ```ruby
 {
-  name:        'QRandom.io',
-  url:         "https://qrandom.io/api/random/ints?n=#{count}&min=0&max=255",
-  data_key:    'numbers',
-  success_key: 'numbers',
-  active:      true
+        name:        'QRandom.io',
+        url:         "https://qrandom.io/api/random/ints?n=#{count}&min=0&max=255",
+        data_key:    'numbers',
+        success_key: 'numbers',
+        active:      true
 }
 ```
 
