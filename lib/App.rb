@@ -1,336 +1,280 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 #------------------------------------------------------------------------------
-#  Файл: App.rb                                                               # RU
-#  File:  App.rb                                                              # EN
+#  File: App_with_sqlite_debug.rb                                             # RU / EN
 #------------------------------------------------------------------------------
-#  Назначение: получить квантовые (и/или истинно случайные) числа с разных    # RU
-#  API-источников, обходя их по очереди, пока один не сработает.              # EN
-#  Purpose:    Retrieve quantum / true random numbers from several           # EN
-#  API sources, iterating through them until one succeeds.                   # EN
+#  Purpose: Retrieve quantum / true‑random numbers by cycling through several
+#  APIs until one succeeds. Adds extensive SQLite diagnostic output so we can
+#  step‑by‑step verify that the local database is reachable, writable, and
+#  returns the expected data back.                                             # RU/EN
 #------------------------------------------------------------------------------
-#  ТЕКУЩАЯ ВЕРСИЯ включает механизм «временной блокировки» API, которые в     # RU
-#  последнем журнале показали сбой (см. таблицу анализа выше).               # EN
-#  THIS VERSION adds a “temporary blocking” mechanism for APIs that failed   # EN
-#  in the most recent run (see analysis table above).                        # EN
+#  VERSION 2025‑06‑22 – DEBUG BUILD                                            # RU/EN
+#  • Added verbose diagnostic puts around every SQLite interaction.            # RU
 #------------------------------------------------------------------------------
 
-#------------------------------------------------------------------------------
-#  Подключаем стандартные библиотеки Ruby для работы с HTTP и JSON            # RU
-#  Load standard Ruby libraries for working with HTTP and JSON                # EN
-#------------------------------------------------------------------------------
-require 'net/http'   # сетевые запросы / HTTP requests
-require 'json'       # парсинг и генерация JSON / JSON parsing & generation
+puts "[DEBUG] Ruby version: #{RUBY_VERSION} (#{RUBY_PLATFORM})"
+puts "[DEBUG] Script dirname : #{__dir__}"
 
 #------------------------------------------------------------------------------
-#  Сообщение о запуске программы                                              # RU
-#  Startup banner                                                             # EN
+#  Load SQLite3 gem and report status                                          # RU/EN
 #------------------------------------------------------------------------------
-puts 'Программа запущена. Начало работы.'          # RU
-puts 'Program started. Beginning execution.'       # EN
-
-#------------------------------------------------------------------------------
-#  Чтение аргумента из командной строки – количества чисел для запроса        # RU
-#  Read the command-line argument – how many numbers to request               # EN
-#------------------------------------------------------------------------------
-puts 'Чтение аргумента из командной строки...'     # RU
-puts 'Reading command-line argument…'              # EN
-count_arg = ARGV[0]                                # сырой текст аргумента / raw arg text
-count      = count_arg&.to_i                       # преобразуем в Integer / convert to Integer
-puts "Получен аргумент командной строки: '#{count_arg || 'не указан'}'"  # RU
-puts "Command-line argument received: '#{count_arg || 'not provided'}'"  # EN
-puts "Преобразование аргумента в число: #{count || 'nil'}"               # RU
-puts "Converted argument to number: #{count || 'nil'}"                   # EN
-
-#------------------------------------------------------------------------------
-#  Проверяем корректность аргумента                                           # RU
-#  Validate the argument                                                      # EN
-#------------------------------------------------------------------------------
-puts 'Проверка корректности введённого количества...'   # RU
-puts 'Validating provided count…'                       # EN
-if count.nil? || count <= 0
-  puts 'Ошибка: аргумент отсутствует или не является положительным числом!'  # RU
-  puts 'Error: argument missing or not a positive integer!'                  # EN
-  puts "Текущее значение count: #{count}"                                    # RU
-  puts "Current value of count: #{count}"                                    # EN
-  puts 'Инструкция: укажите положительное целое число как аргумент.'         # RU
-  puts 'Instruction: supply a positive integer as the argument.'             # EN
-  puts 'Пример запуска: ruby lib/App.rb 5'                                   # RU
-  puts 'Example run:   ruby lib/App.rb 5'                                    # EN
+print "[DEBUG] Requiring 'sqlite3' gem … "
+begin
+  require 'sqlite3'
+  puts "OK (SQLite gem version #{SQLite3::VERSION}, linked against SQLite #{SQLite3::SQLITE_VERSION})"
+rescue LoadError => e
+  puts "FAILED ↯"
+  warn "[ERROR] Could not load the sqlite3 native extension: #{e.message}"
+  warn "[HINT] Ensure the gem is compiled for your Ruby (gem install sqlite3)."
   exit 1
-else
-  puts "Аргумент корректен. Количество чисел для запроса: #{count}"          # RU
-  puts "Argument OK. Quantity of numbers to request: #{count}"               # EN
 end
 
 #------------------------------------------------------------------------------
-#  Структура описания одного API-источника                                    # RU
-#  Structure of a single API descriptor                                       # EN
+#  Prepare local SQLite database                                               # RU/EN
 #------------------------------------------------------------------------------
-#  :name          – человекочитаемое название API                             # RU
-#  :url           – шаблон URL            (включая параметр count)           # RU
-#  :data_key      – ключ, где лежит массив чисел в JSON                      # RU
-#  :success_key   – ключ, сигнализирующий об успехе (либо сам data_key)      # RU
-#  :success_value – (необяз.) конкретное значение success_key для успеха     # RU
-#  :active        – ❗ флаг «активен ли API?» (false = временно заблокирован)  # RU
-#  --------------------------------------------------------------------------------
-#  :name          – human-readable API name                                   # EN
-#  :url           – URL template         (including the count parameter)      # EN
-#  :data_key      – JSON key containing the number array                      # EN
-#  :success_key   – JSON key indicating success (or same as data_key)        # EN
-#  :success_value – (optional) exact success_key value for success           # EN
-#  :active        – ❗ flag “is this API active?” (false = temporarily blocked) # EN
+DB_FILE = File.join(__dir__, 'random_runs.sqlite3')
+puts "[DEBUG] DB file path               : #{DB_FILE}"
+puts "[DEBUG] DB file exists?            : #{File.exist?(DB_FILE)}"
+
+db_is_new = !File.exist?(DB_FILE)
+
+print "[DEBUG] Opening database … "
+DB = SQLite3::Database.new(DB_FILE)
+puts "open (object id #{DB.object_id})"
+
+puts "[DEBUG] SQLite PRAGMA user_version : #{DB.get_first_value('PRAGMA user_version')}"
+
+if db_is_new
+  puts "[DEBUG] Fresh DB detected – creating schema …"
+  DB.execute <<~SQL
+    CREATE TABLE runs (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts        TEXT    NOT NULL,      -- ISO‑8601 timestamp
+      api_name  TEXT,
+      count     INTEGER,
+      numbers   TEXT,                  -- CSV string
+      success   INTEGER,               -- 1 = OK, 0 = error
+      error_msg TEXT
+    );
+  SQL
+  puts "[DEBUG] Table 'runs' created."
+else
+  puts "[DEBUG] Existing DB – verifying that table 'runs' exists …"
+  have_table = DB.get_first_value("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='runs'") == 1
+  puts "[DEBUG] Table present?           : #{have_table}"
+  unless have_table
+    abort "[FATAL] Table 'runs' missing in existing DB – please recreate schema."
+  end
+end
+
+row_count = DB.get_first_value('SELECT COUNT(*) FROM runs')
+puts "[DEBUG] Current number of log rows : #{row_count}"
+
+# Convenience wrapper to log every run
 #------------------------------------------------------------------------------
 
+def log_run(api_name:, count:, numbers:, error_msg:)
+  puts "[LOG] Inserting row – api=#{api_name.inspect}, count=#{count}, success=#{!numbers.nil?}"
+  DB.execute(
+    "INSERT INTO runs (ts, api_name, count, numbers, success, error_msg)
+     VALUES (datetime('now'), ?, ?, ?, ?, ?)",
+    api_name,
+    count,
+    numbers ? numbers.join(',') : nil,
+    numbers ? 1 : 0,
+    error_msg
+  )
+  rowid = DB.last_insert_row_id
+  puts "[LOG] Inserted, last_insert_row_id=#{rowid}"
+  new_row = DB.get_first_row('SELECT * FROM runs WHERE id = ?', rowid)
+  puts "[LOG] Row content: #{new_row.inspect}"
+end
+
 #------------------------------------------------------------------------------
-#  СТАРЫЕ API-источники (некоторые из них сейчас заблокированы)               # RU
-#  LEGACY API sources (some are now blocked)                                  # EN
+#  Standard libraries for HTTP / JSON                                          # RU/EN
+#------------------------------------------------------------------------------
+require 'net/http'
+require 'json'
+
+puts "[DEBUG] Network libraries loaded."
+
+#------------------------------------------------------------------------------
+puts 'Программа запущена. Начало работы.'
+puts 'Program started. Beginning execution.'
+
+puts 'Чтение аргумента из командной строки…'
+count_arg = ARGV[0]
+count     = count_arg&.to_i
+puts "Получен аргумент: '#{count_arg || 'не указан'}'"
+puts "Converted to number: #{count || 'nil'}"
+
+puts 'Проверка корректности значения…'
+if count.nil? || count <= 0
+  puts 'Ошибка: нужен положительный целочисленный аргумент!'
+  puts 'Example: ruby lib/App.rb 5'
+  exit 1
+end
+puts "OK: будем запрашивать #{count} чисел."
+
+#------------------------------------------------------------------------------
+#  API source definitions                                                      # RU/EN
 #------------------------------------------------------------------------------
 legacy_apis = [
   {
-    name:   'ANU QRNG (wp-json endpoint)',                # имя / name
-    url:    "https://qrng.anu.edu.au/wp-json/qrng/random-numbers?count=#{count}",
-    data_key:    'data',
+    name: 'ANU QRNG (wp-json endpoint)',
+    url:  "https://qrng.anu.edu.au/wp-json/qrng/random-numbers?count=#{count}",
+    data_key: 'data',
     success_key: 'success',
-    active: false   # ❌ временно блокируем (5× 404) / temporarily blocked
+    active: false
   },
   {
-    name:   'HotBits',
-    url:    "https://www.fourmilab.ch/cgi-bin/Hotbits.api?nbytes=#{count}&fmt=json&key=Pseudorandom",
-    data_key:    'random-data',
+    name: 'HotBits',
+    url:  "https://www.fourmilab.ch/cgi-bin/Hotbits.api?nbytes=#{count}&fmt=json&key=Pseudorandom",
+    data_key: 'random-data',
     success_key: 'status',
     success_value: 'success',
-    active: false   # ❌ временно блокируем (HTML + JSON error) / temporarily blocked
+    active: false
   },
   {
-    name:   'QNu Labs QRNG',
-    url:    "https://api.qnulabs.com/qrng/random?length=#{count}&type=uint8&key=<your_qnu_key>",
-    data_key:    'numbers',
+    name: 'QNu Labs QRNG',
+    url:  "https://api.qnulabs.com/qrng/random?length=#{count}&type=uint8&key=<your_qnu_key>",
+    data_key: 'numbers',
     success_key: 'success',
-    active: false   # ❌ временно блокируем (DNS error) / temporarily blocked
+    active: false
   }
 ]
 
-#------------------------------------------------------------------------------
-#  НОВЫЕ бесплатные API без регистрации (рабочие)                              # RU
-#  NEW registration-free APIs (working)                                       # EN
-#------------------------------------------------------------------------------
 extra_apis = [
   {
-    name:   'ANU QRNG (jsonI endpoint)',
-    url:    "https://qrng.anu.edu.au/API/jsonI.php?length=#{count}&type=uint8",
-    data_key:    'data',
+    name: 'ANU QRNG (jsonI endpoint)',
+    url:  "https://qrng.anu.edu.au/API/jsonI.php?length=#{count}&type=uint8",
+    data_key: 'data',
     success_key: 'data',
-    active: true   # ✅ активен / active
+    active: false
   },
   {
-    name:   'QRandom.io',
-    url:    "https://qrandom.io/api/random/ints?min=0&max=255&n=#{count}",
-    data_key:    'numbers',
+    name: 'QRandom.io',
+    url:  "https://qrandom.io/api/random/ints?min=0&max=255&n=#{count}",
+    data_key: 'numbers',
     success_key: 'numbers',
-    active: true   # ✅ активен / active
+    active: true
   },
   {
-    name:   'LfD QRNG (OTH Regensburg)',
-    url:    "https://lfdr.de/qrng_api/qrng?length=#{count}&format=HEX",
-    data_key:    'qrn',
+    name: 'LfD QRNG (OTH Regensburg)',
+    url:  "https://lfdr.de/qrng_api/qrng?length=#{count}&format=HEX",
+    data_key: 'qrn',
     success_key: 'qrn',
-    active: true   # ✅ активен / active
+    active: true
   }
 ]
 
-#------------------------------------------------------------------------------
-#  Объединяем списки API и фильтруем только активные                           # RU
-#  Merge API lists and keep only those that are active                         # EN
-#------------------------------------------------------------------------------
-apis = (legacy_apis + extra_apis).select { |api| api[:active] }
+apis = (legacy_apis + extra_apis).select { |a| a[:active] }
 
 #------------------------------------------------------------------------------
-#  Функция запроса случайных чисел из конкретного API                          # RU
-#  Helper: fetch random numbers from a single API                              # EN
+# Helper to fetch random numbers from an API, now with extra debug output      # RU/EN
 #------------------------------------------------------------------------------
-def fetch_random_numbers(api, count)
-  # Формируем URL / build URI
+
+def fetch_random_numbers(api)
   uri = URI(api[:url])
-  puts "Формирование URL для #{api[:name]}: #{uri}"          # RU
-  puts "Constructed URL for #{api[:name]}: #{uri}"           # EN
+  puts "[FETCH] URL → #{uri}"
 
-  max_attempts = 5   # максимум попыток / maximum attempts
+  max_attempts = 5
   attempt      = 1
+  last_error   = nil
 
   while attempt <= max_attempts
-    puts "Попытка #{attempt} из #{max_attempts} для #{api[:name]}..."   # RU
-    puts "Attempt #{attempt} of #{max_attempts} for #{api[:name]}…"     # EN
+    puts "[FETCH] Attempt #{attempt}/#{max_attempts} with #{api[:name]}"
     begin
-      #------------------------------------------------------------------------------
-      #  Отправка GET-запроса с тайм-аутами                                      # RU
-      #  Send GET request with time-outs                                         # EN
-      #------------------------------------------------------------------------------
-      puts "Отправка GET-запроса к #{api[:name]}..."    # RU
-      puts "Sending GET request to #{api[:name]}…"      # EN
       response = Net::HTTP.start(
         uri.host, uri.port,
         use_ssl: uri.scheme == 'https',
-        open_timeout: 5,     # секунд до установки TCP / seconds to open
-        read_timeout: 10     # секунд ожидания ответа / seconds to read
+        open_timeout: 5,
+        read_timeout: 10
       ) { |http| http.get(uri.request_uri) }
 
-      puts 'Запрос отправлен. Получен ответ.'           # RU
-      puts 'Request sent. Response received.'           # EN
-      puts "Код ответа HTTP: #{response.code}"          # RU
-      puts "HTTP status code: #{response.code}"         # EN
-      puts "Сообщение ответа: #{response.message}"      # RU
-      puts "HTTP status text: #{response.message}"      # EN
-
-      #------------------------------------------------------------------------------
-      #  Проверяем успешность HTTP-ответа                                         # RU
-      #  Check HTTP success                                                       # EN
-      #------------------------------------------------------------------------------
+      puts "[FETCH] HTTP #{response.code} #{response.message}"
       if response.is_a?(Net::HTTPSuccess)
-        puts 'Ответ успешен (статус 200). Обработка тела...'   # RU
-        puts 'HTTP 200 OK. Processing body…'                   # EN
-        # Перекодируем тело в UTF-8 / Re-encode to UTF-8
         body = response.body.encode('UTF-8', invalid: :replace, undef: :replace)
-
-        puts 'Тело ответа (обрезано до 300 символов):'         # RU
-        puts 'Response body (first 300 chars):'                # EN
-        puts body[0, 300]
-
-        #------------------------------------------------------------------------------
-        #  Парсинг JSON                                                          # RU
-        #  Parse JSON                                                            # EN
-        #------------------------------------------------------------------------------
-        begin
-          json_response = JSON.parse(body)
-        rescue JSON::ParserError => e
-          puts "Ошибка JSON: #{e.message}"                     # RU
-          puts "JSON parse error: #{e.message}"                # EN
+        json = JSON.parse(body) rescue nil
+        unless json
+          last_error = 'invalid JSON'
+          puts "[FETCH] Parse failed: invalid JSON"
           break
         end
 
-        puts 'JSON успешно распарсен.'                         # RU
-        puts 'JSON parsed successfully.'                       # EN
-        puts "Содержимое JSON: #{json_response.inspect}"       # RU
-        puts "JSON content: #{json_response.inspect}"          # EN
-
-        #------------------------------------------------------------------------------
-        #  Проверяем поле успеха                                                 # RU
-        #  Validate success field                                                # EN
-        #------------------------------------------------------------------------------
-        success = if api.key?(:success_value)
-                    json_response[api[:success_key]] == api[:success_value]
+        success = if api[:success_value]
+                    json[api[:success_key]] == api[:success_value]
                   else
-                    !!json_response[api[:success_key]]
+                    json[api[:success_key]]
                   end
-
-        # Если сервис не предоставляет специальный флаг успеха –                 # RU
-        # считаем успехом наличие нужного поля                                   # RU
-        # If service lacks explicit flag, presence of the data field is success  # EN
-        success ||= json_response.key?(api[:data_key])
+        success ||= json.key?(api[:data_key])
+        puts "[FETCH] Success flag: #{success.inspect}"
 
         if success
-          puts "#{api[:name]} вернул успешный результат."      # RU
-          puts "#{api[:name]} returned success."               # EN
-
-          random_data = json_response[api[:data_key]]
-
-          #------------------------------------------------------------------------------
-          #  Специальная обработка форматов                                       # RU
-          #  Special format handling                                              # EN
-          #------------------------------------------------------------------------------
-          if random_data.is_a?(String)
-            # LfD QRNG отдаёт HEX-строку; конвертируем в массив чисел uint8       # RU
-            # LfD QRNG returns a HEX string; convert to uint8 array              # EN
-            if random_data.match?(/\A[0-9a-fA-F]+\z/)
-              random_data = random_data.scan(/../).map { |h| h.to_i(16) }
-              puts "HEX-строка конвертирована в массив (#{random_data.size} элементов)."  # RU
-              puts "HEX string converted to array (#{random_data.size} items)."           # EN
-            end
+          data = json[api[:data_key]]
+          if data.is_a?(String) && data =~ /\A[0-9a-fA-F]+\z/
+            data = data.scan(/../).map { |h| h.to_i(16) }
           end
+          puts "[FETCH] Received data: #{data.inspect}"
+          return data if data.is_a?(Array)
 
-          # Проверка, что это массив чисел                                        # RU
-          # Ensure we have an array of numbers                                    # EN
-          if random_data.is_a?(Array)
-            puts 'Данные валидны. Возвращаем массив чисел.'     # RU
-            puts 'Data valid. Returning number array.'          # EN
-            return random_data
-          else
-            puts 'Ошибка: данные не в виде массива!'            # RU
-            puts 'Error: data not an array!'                    # EN
-            break
-          end
+          last_error = 'unexpected payload'
+          break
         else
-          puts "API-ошибка: #{json_response['message'] || 'unknown'}"   # RU
-          puts "API error: #{json_response['message'] || 'unknown'}"    # EN
+          last_error = 'API returned error flag'
           break
         end
       else
-        # HTTP-ошибка                                                         # RU
-        # HTTP error                                                          # EN
-        puts 'HTTP-запрос не успешен!'                          # RU
-        puts 'HTTP request failed!'                             # EN
+        last_error = "HTTP #{response.code}"
       end
     rescue StandardError => e
-      # Сетевые ошибки                                                         # RU
-      # Network errors                                                         # EN
-      puts "Сетевая ошибка: #{e.message}"                       # RU
-      puts "Network error: #{e.message}"                        # EN
+      last_error = e.message
     end
 
-    #------------------------------------------------------------------------------
-    #  Повторная попытка                                                      # RU
-    #  Retry logic                                                            # EN
-    #------------------------------------------------------------------------------
     attempt += 1
-    if attempt <= max_attempts
-      puts 'Ожидание 5 секунд перед следующей попыткой...'      # RU
-      puts 'Waiting 5 seconds before next attempt…'             # EN
-      sleep 5
-    end
+    puts "[FETCH] Sleeping 5 s before retry …" if attempt <= max_attempts
+    sleep 5 if attempt <= max_attempts
   end
 
-  # Если дошли сюда – попытки исчерпаны                                      # RU
-  # If we reach here – all attempts exhausted                                # EN
-  puts "Все попытки для #{api[:name]} исчерпаны."               # RU
-  puts "All attempts for #{api[:name]} exhausted."              # EN
+  puts "[FETCH] All attempts exhausted for #{api[:name]} – last_error=#{last_error.inspect}"
   nil
 end
 
 #------------------------------------------------------------------------------
-#  Перебираем API-источники по очередь, пока один не даст результат            # RU
-#  Iterate over API list until one succeeds                                    # EN
+#  Main loop – iterate over APIs                                               # RU/EN
 #------------------------------------------------------------------------------
-numbers = nil   # итоговый результат / final result placeholder
-apis.each_with_index do |api, idx|
-  puts "\nПопытка использовать API: #{api[:name]}"              # RU
-  puts "\nTrying API: #{api[:name]}"                            # EN
 
-  numbers = fetch_random_numbers(api, count)
+numbers = nil
+apis.each_with_index do |api, idx|
+  puts "\n→ Используем API: #{api[:name]}"
+  numbers = fetch_random_numbers(api)
+
+  #----- Log to SQLite
+  log_run(
+    api_name:  api[:name],
+    count:     count,
+    numbers:   numbers,
+    error_msg: numbers ? nil : 'no data returned'
+  )
+
   if numbers
-    puts "Успешно получены числа от #{api[:name]}!"             # RU
-    puts "Successfully retrieved numbers from #{api[:name]}!"   # EN
-    puts "Случайные квантовые числа: #{numbers.join(', ')}"     # RU
-    puts "Quantum random numbers: #{numbers.join(', ')}"        # EN
+    puts "✅ Получены числа: #{numbers.join(', ')}"
     break
   else
-    if idx < apis.size - 1
-      puts 'Переключение на следующий API...'                   # RU
-      puts 'Switching to next API…'                             # EN
-    end
+    puts 'Пробуем следующий API…' if idx < apis.size - 1
   end
 end
 
 #------------------------------------------------------------------------------
-#  Финальный результат или ошибка                                             # RU
-#  Final outcome or failure                                                   # EN
+#  Final summary                                                               # RU/EN
 #------------------------------------------------------------------------------
-puts "\nПроверка результата..."                                 # RU
-puts "\nChecking final result…"                                # EN
+
+total_rows = DB.get_first_value('SELECT COUNT(*) FROM runs')
+puts "[SUMMARY] Total rows in 'runs' table: #{total_rows}"
+
 if numbers
-  puts 'Программа успешно завершена.'                           # RU
-  puts 'Program finished successfully.'                         # EN
+  puts 'Программа завершена успешно.'
 else
-  puts 'Ошибка: все активные API недоступны! Невозможно получить числа.' # RU
-  puts 'Error: all active APIs unreachable! Unable to obtain numbers.'   # EN
+  puts '❌ Все активные API оказались недоступны.'
   exit 1
 end
