@@ -23,9 +23,9 @@ begin
   require 'sqlite3'
   puts "OK (SQLite gem version #{SQLite3::VERSION}, linked against SQLite #{SQLite3::SQLITE_VERSION})"
 rescue LoadError => e
-  puts "FAILED ↯"
+  puts 'FAILED ↯'
   warn "[ERROR] Could not load the sqlite3 native extension: #{e.message}"
-  warn "[HINT] Ensure the gem is compiled for your Ruby (gem install sqlite3)."
+  warn '[HINT] Ensure the gem is compiled for your Ruby (gem install sqlite3).'
   exit 1
 end
 
@@ -38,14 +38,14 @@ puts "[DEBUG] DB file exists?            : #{File.exist?(DB_FILE)}"
 
 db_is_new = !File.exist?(DB_FILE)
 
-print "[DEBUG] Opening database … "
+print '[DEBUG] Opening database … '
 DB = SQLite3::Database.new(DB_FILE)
 puts "open (object id #{DB.object_id})"
 
 puts "[DEBUG] SQLite PRAGMA user_version : #{DB.get_first_value('PRAGMA user_version')}"
 
 if db_is_new
-  puts "[DEBUG] Fresh DB detected – creating schema …"
+  puts '[DEBUG] Fresh DB detected – creating schema …'
   DB.execute <<~SQL
     CREATE TABLE runs (
       id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,7 +96,7 @@ end
 require 'net/http'
 require 'json'
 
-puts "[DEBUG] Network libraries loaded."
+puts '[DEBUG] Network libraries loaded.'
 
 #------------------------------------------------------------------------------
 puts 'Программа запущена. Начало работы.'
@@ -111,7 +111,7 @@ puts "Converted to number: #{count || 'nil'}"
 puts 'Проверка корректности значения…'
 if count.nil? || count <= 0
   puts 'Ошибка: нужен положительный целочисленный аргумент!'
-  puts 'Example: ruby lib/App.rb 5'
+  puts 'Example: ruby lib/App_with_sqlite_debug.rb 5'
   exit 1
 end
 puts "OK: будем запрашивать #{count} чисел."
@@ -198,7 +198,7 @@ def fetch_random_numbers(api)
         json = JSON.parse(body) rescue nil
         unless json
           last_error = 'invalid JSON'
-          puts "[FETCH] Parse failed: invalid JSON"
+          puts '[FETCH] Parse failed: invalid JSON'
           break
         end
 
@@ -232,7 +232,7 @@ def fetch_random_numbers(api)
     end
 
     attempt += 1
-    puts "[FETCH] Sleeping 5 s before retry …" if attempt <= max_attempts
+    puts '[FETCH] Sleeping 5 s before retry …' if attempt <= max_attempts
     sleep 5 if attempt <= max_attempts
   end
 
