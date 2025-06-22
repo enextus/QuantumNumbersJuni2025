@@ -70,25 +70,32 @@ end
 row_count = DB.get_first_value('SELECT COUNT(*) FROM runs')
 puts "[DEBUG] Current number of log rows : #{row_count}"
 
+
+
 # Convenience wrapper to log every run
 #------------------------------------------------------------------------------
 
 def log_run(api_name:, count:, numbers:, error_msg:)
   puts "[LOG] Inserting row – api=#{api_name.inspect}, count=#{count}, success=#{!numbers.nil?}"
+
   DB.execute(
-    "INSERT INTO runs (ts, api_name, count, numbers, success, error_msg)
-     VALUES (datetime('now'), ?, ?, ?, ?, ?)",
-    api_name,
-    count,
-    numbers ? numbers.join(',') : nil,
-    numbers ? 1 : 0,
-    error_msg
+    <<~SQL,
+      INSERT INTO runs
+            (ts,                api_name, count, numbers,          success, error_msg)
+      VALUES (datetime('now'), ?,        ?,     ?,                ?,       ?)
+    SQL
+    [ api_name,
+      count,
+      numbers ? numbers.join(',') : nil,
+      numbers ? 1 : 0,
+      error_msg ]
   )
+
   rowid = DB.last_insert_row_id
   puts "[LOG] Inserted, last_insert_row_id=#{rowid}"
-  new_row = DB.get_first_row('SELECT * FROM runs WHERE id = ?', rowid)
-  puts "[LOG] Row content: #{new_row.inspect}"
+  puts "[LOG] Row content: #{DB.get_first_row('SELECT * FROM runs WHERE id = ?', rowid).inspect}"
 end
+
 
 #------------------------------------------------------------------------------
 #  Standard libraries for HTTP / JSON                                          # RU/EN
